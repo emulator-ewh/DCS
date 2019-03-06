@@ -167,6 +167,20 @@ static string_matrix FileToMatrix (const std::string &kFilename,
 	return matrix;
 }
 
+// Transpose string_matrix
+static string_matrix transpose (string_matrix &Matrix) {
+	string_matrix Tmatrix;
+	std::vector<std::string> row;
+	for (unsigned int i=0; i<Matrix[0].size(); i++) {
+		row.clear();
+		for (unsigned int k=0; k<Matrix.size(); k++) {
+			row.push_back(Matrix[k][i]);
+		}
+		Tmatrix.push_back(row);
+	}
+	return Tmatrix;
+}
+
 };  // end tsu
 
 

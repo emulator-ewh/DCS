@@ -1,8 +1,6 @@
-
 // INCLUDES
 #include <iostream>
 #include <ctime>
-#include <cmath>
 #include "include/SmartGridDevice.h"
 
 // Constructor
@@ -13,11 +11,12 @@ SmartGridDevice::SmartGridDevice (DistributedEnergyResource* der_ptr,
                                   const char* path) : ajn::BusObject(path),
                                                       der_ptr_(der_ptr),
                                                       bus_ptr_(bus_ptr),
-                                                      signal_(NULL),
-                                                      interface_(name) {
+                                                      interface_(name),
+                                                      signal_(NULL) {
     const ajn::InterfaceDescription* interface = bus_ptr_->GetInterface(interface_);
     assert(interface != NULL);
     AddInterface(*interface, ANNOUNCED);
+    old_import_energy_ = 0;
 
     const ajn::BusObject::MethodEntry methods[] = {{
             interface->GetMember("ImportPower"), 
@@ -36,9 +35,6 @@ SmartGridDevice::SmartGridDevice (DistributedEnergyResource* der_ptr,
     if (ER_OK != status) {
         throw status;
     }
-
-    last_import_energy_ = der_ptr_->GetImportEnergy ();
-    last_export_energy_ = der_ptr_->GetExportEnergy ();
 }
 
 // Import Power Handler
@@ -47,9 +43,9 @@ void SmartGridDevice::ImportPowerHandler (
         const ajn::InterfaceDescription::Member* member,
         ajn::Message& message) {
     (void)member;
-    unsigned int import_watts = message->GetArg(0)->v_uint32;
-    std::cout << "[ALLJOYN]: Import...\t" << import_watts << std::endl;
-    der_ptr_->SetImportWatts (import_watts);
+    import_watts_ = message->GetArg(0)->v_uint32;
+    std::cout << "[ALLJOYN]: Import...\t" << import_watts_ << std::endl;
+    der_ptr_->SetImportWatts (import_watts_);
 }  // end Import Power Handler
 
 // Export Power Handler
@@ -58,9 +54,9 @@ void SmartGridDevice::ExportPowerHandler (
         const ajn::InterfaceDescription::Member* member,
         ajn::Message& message) {
     (void)member;
-    unsigned int export_watts = message->GetArg(0)->v_uint32;
-    std::cout << "[ALLJOYN]: Export...\t" << export_watts << std::endl;
-    der_ptr_->SetExportWatts (export_watts);
+    export_watts_ = message->GetArg(0)->v_uint32;
+    std::cout << "[ALLJOYN]: Export...\t" << export_watts_ << std::endl;
+    der_ptr_->SetExportWatts (export_watts_);
 }  // end Export Power Handler
 
 // Get
@@ -74,8 +70,6 @@ QStatus SmartGridDevice::Get (const char* interface,
         return ER_FAIL;
     }
 
-    last_telemetry_utc_ = time (0);
-
     if (!strcmp(property,"rated_import_power")) {
         status = value.Set("u", der_ptr_->GetRatedImportPower ());
         return status;
@@ -86,8 +80,7 @@ QStatus SmartGridDevice::Get (const char* interface,
         status = value.Set("u", der_ptr_->GetImportPower ());
         return status;
     } else if (!strcmp(property,"import_energy")) {
-        last_import_energy_ = der_ptr_->GetImportEnergy ();
-        status = value.Set("u", last_import_energy_);
+        status = value.Set("u", der_ptr_->GetImportEnergy ());
         return status;
     } else if (!strcmp(property,"import_ramp")) {
         status = value.Set("u", der_ptr_->GetImportRamp ());
@@ -102,8 +95,7 @@ QStatus SmartGridDevice::Get (const char* interface,
         status = value.Set("u", der_ptr_->GetExportPower ());
         return status;
     } else if (!strcmp(property,"export_energy")) {
-        last_export_energy_ = der_ptr_->GetExportEnergy ();
-        status = value.Set("u", last_export_energy_);
+        status = value.Set("u", der_ptr_->GetExportEnergy ());
         return status;
     } else if (!strcmp(property,"export_ramp")) {
         status = value.Set("u", der_ptr_->GetExportRamp ());
@@ -130,6 +122,7 @@ const char* props[] = { "rated_export_power",
                         "idle_losses"};
     QStatus status;
     status = EmitPropChanged (interface_, props, 11, ajn::SESSION_ID_ALL_HOSTED);
+    std::cout << "Sending Property Update" << std::endl;
     return status;
 }  // end Send Properties Update
 
@@ -138,27 +131,30 @@ const char* props[] = { "rated_export_power",
 // - it will also send the regularly scheduled telemetry
 void SmartGridDevice::Loop () {
     unsigned int utc = time (0);
-    bool new_update = (last_telemetry_utc_ != utc);
-    bool five_minutes = (utc % (5*60) == 0);
-    bool one_hour = (utc % (60*60) == 0);
+    // every 5 minutes check for deviation in import/export power vs
+    // import/export watts setting. Trigger at 20% (arbitrary)
+    float import_power = der_ptr_->GetImportPower ();
+    float delta_import = import_power / import_watts_;
+    float export_power = der_ptr_->GetExportPower ();
+    float delta_export = export_power / export_watts_;
 
-    float import_energy = der_ptr_->GetImportEnergy ();
-    float export_energy = der_ptr_->GetExportEnergy ();
-    float delta_import = std::abs((import_energy / last_import_energy_) - 1);
-    float delta_export = std::abs((export_energy / last_export_energy_) - 1);
-    // import/export energy setting. Trigger at 10% (arbitrary)
-    bool energy_deviation = (delta_export > 0.1 || delta_import > 0.1);
+    unsigned int import_energy = der_ptr_->GetImportEnergy ();
+    float delta_energy = float(abs(old_import_energy_ - import_energy))/der_ptr_->GetRatedImportEnergy ();
 
     // every hour send telemetry update
-    if (one_hour && new_update) {
+    if (utc % 3600 == 0 && last_telemetry_utc_ != utc){
         QStatus status = SmartGridDevice::SendPropertiesUpdate ();
-        std::cout << "Sending telemetry update:\t" << status << std::endl;
+        if (status != ER_OK) {
+            std::cout << "Property update:\t" << status << std::endl;
+        }
         last_telemetry_utc_ = utc;
-    // every 5 minutes check for deviation in import/export energy
-    } else if (five_minutes && new_update && energy_deviation) {
+    } else if (utc % (5*60) == 0 && (delta_energy > 0.1) && utc != last_telemetry_utc_) {
         QStatus status = SmartGridDevice::SendPropertiesUpdate ();
-        std::cout << "Energy deviation... sending property update:\t" 
-            << status << std::endl;
+        if (status != ER_OK) {
+            std::cout << "Property update:\t" << status << std::endl;
+        }
         last_telemetry_utc_ = utc;
+
+	old_import_energy_ = import_energy;
     }
 }

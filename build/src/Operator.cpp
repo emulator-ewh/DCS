@@ -49,7 +49,11 @@ void Operator::Loop () {
 
             // log index so multiple controls are not sent and to reduce
             // search time.
-            index_ = i;
+            if (i == schedule_.size() - 1) {
+		index_ = 0;
+	    } else {
+		index_ = i;
+	    }
         }
     }
 }  // end Loop

@@ -37,6 +37,7 @@
 #include <vector>
 #include <map>
 #include "include/DistributedEnergyResource.h"
+#include "include/WaterHeaterEmulator.h"
 #include "include/CommandLineInterface.h"
 #include "include/Operator.h"
 #include "include/SmartGridDevice.h"
@@ -71,6 +72,7 @@ static std::map <std::string, std::string> ArgumentParser (int argc,
 
     // parse tokens
     map <string, string> parameters;
+    parameters["ID"] = 1;
     string token, argument;
 
     for (int i = 1; i < argc; i = i+2){
@@ -94,13 +96,15 @@ static std::map <std::string, std::string> ArgumentParser (int argc,
         } else if ((token == "-o")) {
             if ((argument == "y")) {
             	scheduled = true;
-            } else if ((argument == "n")) {
-                scheduled = false;
-            } else {
-	        	cout << "[ERROR] : Invalid program argument: " << token << endl;
-	            ProgramHelp(name);
-	            exit(EXIT_FAILURE); 
+	    } else if (argument == "n") {
+		scheduled = false;
+	    } else {
+		cout << "[ERROR] : Invalid program argument: " << token << endl;
+		ProgramHelp(name);
+	        exit(EXIT_FAILURE); 
             }
+	} else if ((token == "-i")) {
+	    parameters["ID"] = argument;
         } else {
             cout << "[ERROR] : Invalid parameter: " << token << endl;
             ProgramHelp(name);
@@ -212,9 +216,10 @@ int main (int argc, char** argv) {
     tsu::config_map configs = tsu::MapConfigFile (arguments["config"]);
 
     cout << "\tCreating Distributed Energy Resource\n";
-    // ~ reference DistributedEnergyResource and BatteryEnergyStorageSystem
-    DistributedEnergyResource* der_ptr 
-        = new DistributedEnergyResource(configs["DER"]);
+    // ~ reference DistributedEnergyResource
+    WaterHeaterEmulator* der_ptr 
+    	//= new DistributedEnergyResource(configs["DER"]);
+	= new WaterHeaterEmulator(configs, stoul(arguments["ID"]));
 
     cout << "\tCreating Operator\n";
     // ~ reference Operator.h
@@ -292,15 +297,11 @@ int main (int argc, char** argv) {
     cout << "\tCreating AllJoyn Smart Grid Device\n";
     // ~ reference SmartGridDevice.cpp
     const char* device_name = configs["AllJoyn"]["device_interface"].c_str();
-    string path = configs["AllJoyn"]["path"];
-    string region = "region" + to_string(rand() % 100) + "/";
-    string substation = "substation" + to_string(rand() % 100) + "/";
-    string feeder = "feeder" + to_string(rand() % 100) + "/";
-    path = path + region + substation + feeder + app;
+    const char* path = configs["AllJoyn"]["path"].c_str();
     SmartGridDevice *sgd_ptr = new SmartGridDevice(der_ptr, 
                                                    bus_ptr, 
                                                    device_name, 
-                                                   path.c_str());
+                                                   path);
 
     cout << "\t\tRegistering AllJoyn Smart Grid Device\n";
     if (ER_OK != bus_ptr->RegisterBusObject(*sgd_ptr)){
