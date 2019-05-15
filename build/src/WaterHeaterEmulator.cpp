@@ -20,9 +20,6 @@ WaterHeaterEmulator::WaterHeaterEmulator (tsu::config_map &config, unsigned int 
 	std::srand(time(NULL));
 	std::random_device rd;
 	std::mt19937 gen(rd());
-	//std::binomial_distribution<> d(4,0.5);
-	//int size;
-	//size = d(gen) +1;
 	
 	float rn = float(rand())/RAND_MAX;
 	int size;
@@ -85,7 +82,7 @@ WaterHeaterEmulator::WaterHeaterEmulator (tsu::config_map &config, unsigned int 
 		schedule_[i].at(1) = std::to_string(event_vol);
 	}			
 
-	//Setting member properties for WHs *I will probably remove/replace this*
+	//Setting member properties for WHs
 	SetRatedImportPower(stoul(config["EWH"]["rated_import_power"]));
 	SetRatedImportEnergy(3630);
 	SetImportRamp(4500);
@@ -182,10 +179,8 @@ void WaterHeaterEmulator::IdleLoss (float delta_time) {
 	float seconds = delta_time / 1000;
 	float hours = seconds / (60*60);
 	float import_energy = WaterHeaterEmulator::GetImportEnergyFloat ();
-	float loss_factor = 1 - import_energy/GetRatedImportEnergy ();
-	float energy_loss = GetIdleLosses () * hours * loss_factor;
+	float energy_loss = 22000/(import_energy + 215) * hours;
 	SetImportPower (0);
-	//WaterHeaterEmulator::SetNormalImportPower (0);
 	WaterHeaterEmulator::SetImportEnergyFloat (import_energy + energy_loss);
 	SetImportEnergy(import_energy + energy_loss);
 };
